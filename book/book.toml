@@ -7,3 +7,4 @@ title = "Obsidian Export"
 
 [output.html]
 git-repository-url = "https://github.com/zoni/obsidian-export"
+site-url = "/obsidian-export"
