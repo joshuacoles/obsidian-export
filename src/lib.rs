@@ -27,7 +27,9 @@ type MarkdownTree<'a> = Vec<Event<'a>>;
 lazy_static! {
     static ref OBSIDIAN_NOTE_LINK_RE: Regex =
         Regex::new(r"^(?P<file>[^#|]+)??(#(?P<section>.+?))??(\|(?P<label>.+?))??$").unwrap();
+    static ref OBSIDIAN_BLOCK_REFERENCE: Regex = Regex::new(r"\^(?P<id>\w+)$").unwrap();
 }
+
 const PERCENTENCODE_CHARS: &AsciiSet = &CONTROLS.add(b' ').add(b'(').add(b')').add(b'%');
 const NOTE_RECURSION_LIMIT: usize = 10;
 
@@ -440,14 +442,45 @@ impl<'a> Exporter<'a> {
                         }
                     }
                 }
+
+                // If the block is tagged it will be at the end of the paragraph (or in its own if
+                // there is a blank line between the block and its tag, however this will still
+                // match).
+                //
+                // TODO: Check tables and lists and stuff
+                // TODO: Do we want to move the HTML TAG to be above the thing some how?
+                //       would need arbitrary back track to the respective Event::Start
+                Event::End(tag @ Tag::Paragraph)
+                | Event::End(tag @ Tag::List(_))
+                | Event::End(tag @ Tag::Item) => {
+                    let last = tree.last_mut().unwrap();
+                    if let Event::Text(ref mut cs) = last {
+                        if let Some(captures) = OBSIDIAN_BLOCK_REFERENCE.captures(cs.as_ref()) {
+                            let capture = captures.name("id").unwrap();
+                            let id = captures.name("id").map(|v| v.as_str()).unwrap().to_string();
+
+                            // Remove the tag
+                            let mut string: String = cs.clone().into_string();
+                            string.truncate(capture.start() - 1); // Remove '^id' tag at the end of the line.
+                            *cs = CowStr::from(string);
+
+                            // Add id-tga
+                            tree.push(Event::Html(format!("<div id=\"{}\"></div>", id).into()));
+                        }
+                    }
+
+                    tree.push(Event::End(tag));
+                }
+
                 _ => tree.push(event),
             }
+
             if !buffer.is_empty() {
                 tree.append(&mut buffer);
                 buffer.clear();
             }
         }
-        tree.append(&mut buffer);
+
         Ok(tree.into_iter().map(event_to_owned).collect())
     }
 
